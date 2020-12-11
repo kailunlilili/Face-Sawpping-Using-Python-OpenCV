@@ -188,6 +188,7 @@ def correct_colours(im1, im2, landmarks1):
 
 
 for filename in glob.glob('*.jpg'):
+    print(filename)
     im = cv2.imread(filename, cv2.IMREAD_COLOR)
     im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
                          im.shape[0] * SCALE_FACTOR))

@@ -51,6 +51,8 @@ import sys
 import glob
 import shutil
 import image_processing
+import numpy as np
+
 PREDICTOR_PATH = "shape_predictor_68_face_landmarks.dat"
 SCALE_FACTOR = 1
 FEATHER_AMOUNT = 11
@@ -123,6 +125,12 @@ def get_face_mask(im, landmarks):
 
     return im
 
+def extract_index_nparray(nparray):
+    index = None
+    for num in nparray[0]:
+        index = num
+        break
+    return index
 
 def transformation_from_points(points1, points2):
     """
@@ -193,52 +201,161 @@ def correct_colours(im1, im2, landmarks1):
 
 
 
-im_source = cv2.imread("./image folder/source.jpg", cv2.IMREAD_COLOR)
+im_source = cv2.imread("./image folder/source.jpg")
 im_source = cv2.resize(im_source, (im_source.shape[1] * SCALE_FACTOR,
                                    im_source.shape[0] * SCALE_FACTOR))
+img_gray = cv2.cvtColor(im_source, cv2.COLOR_BGR2GRAY)
+mask = np.zeros_like(img_gray)
+
 source_rect = detector(im_source, 1)
-print(im_source.shape)
+
+
+faces = detector(img_gray)
+for face in faces:
+    landmarks = predictor(img_gray, face)
+    landmarks_points = []
+    for n in range(0, 68):
+        x = landmarks.part(n).x
+        y = landmarks.part(n).y
+        landmarks_points.append((x, y))
+
+
+    points = np.array(landmarks_points, np.int32)
+    convexhull = cv2.convexHull(points)
+    # cv2.polylines(img, [convexhull], True, (255, 0, 0), 3)
+    cv2.fillConvexPoly(mask, convexhull, 255)
+
+    face_image_1 = cv2.bitwise_and(im_source, im_source, mask=mask)
+
+    # Delaunay triangulation
+    rect = cv2.boundingRect(convexhull)
+    subdiv = cv2.Subdiv2D(rect)
+    subdiv.insert(landmarks_points)
+    triangles = subdiv.getTriangleList()
+    triangles = np.array(triangles, dtype=np.int32)
+
+    indexes_triangles = []
+    for t in triangles:
+        pt1 = (t[0], t[1])
+        pt2 = (t[2], t[3])
+        pt3 = (t[4], t[5])
+
+
+        index_pt1 = np.where((points == pt1).all(axis=1))
+        index_pt1 = extract_index_nparray(index_pt1)
+
+        index_pt2 = np.where((points == pt2).all(axis=1))
+        index_pt2 = extract_index_nparray(index_pt2)
+
+        index_pt3 = np.where((points == pt3).all(axis=1))
+        index_pt3 = extract_index_nparray(index_pt3)
+
+        if index_pt1 is not None and index_pt2 is not None and index_pt3 is not None:
+            triangle = [index_pt1, index_pt2, index_pt3]
+            indexes_triangles.append(triangle)
+
+
+
+
+
 for filename in glob.glob('*.jpg'):
-    im = cv2.imread(filename, cv2.IMREAD_COLOR)
+    im = cv2.imread(filename)
     im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
                          im.shape[0] * SCALE_FACTOR))
-    rects = detector(im, 1)
+    img2_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    height, width, channels = im.shape
+    img2_new_face = np.zeros((height, width, channels), np.uint8)
+    rects = detector(img2_gray)
+
     if len(rects) == 0:
         print(filename + " is missing faces. skipping.")
         shutil.copyfile(filename, 'output/' + filename)
         continue
 
-    im1, landmarks1 = (im, numpy.matrix([[p.x, p.y] for p in predictor(im, rects[0]).parts()]))
-    im2source, landmarks_source = (
-    im_source, numpy.matrix([[p.x, p.y] for p in predictor(im_source, source_rect[0]).parts()]))
+    landmarks = predictor(img2_gray, rects[0])
+    landmarks_points2 = []
+    for n in range(0, 68):
+        x = landmarks.part(n).x
+        y = landmarks.part(n).y
+        landmarks_points2.append((x, y))
 
-    M = transformation_from_points(landmarks1[ALIGN_POINTS],
-                                   landmarks_source[ALIGN_POINTS])
+    points2 = np.array(landmarks_points2, np.int32)
+    convexhull2 = cv2.convexHull(points2)
 
-    # M1 = transformation_from_points(landmarks_source[ALIGN_POINTS],
-    #                                 landmarks1[ALIGN_POINTS])
+    lines_space_mask = np.zeros_like(img_gray)
+    lines_space_new_face = np.zeros_like(im)
 
-    mask = get_face_mask(im2source, landmarks_source)
-    # mask1 = get_face_mask(im1, landmarks1)
+    for triangle_index in indexes_triangles:
+        # Triangulation of the first face
+        tr1_pt1 = landmarks_points[triangle_index[0]]
+        tr1_pt2 = landmarks_points[triangle_index[1]]
+        tr1_pt3 = landmarks_points[triangle_index[2]]
+        triangle1 = np.array([tr1_pt1, tr1_pt2, tr1_pt3], np.int32)
 
-    warped_mask = warp_im(mask, M, im1.shape)
-    # warped_mask1 = warp_im(mask1, M1, im2source.shape)
+        rect1 = cv2.boundingRect(triangle1)
+        (x, y, w, h) = rect1
+        cropped_triangle = im_source[y: y + h, x: x + w]
+        cropped_tr1_mask = np.zeros((h, w), np.uint8)
 
-    combined_mask = numpy.max([get_face_mask(im1, landmarks1), warped_mask],
-                              axis=0)
-    # combined_mask1 = numpy.max([get_face_mask(im2source, landmarks_source), warped_mask1],
-    #                            axis=0)
+        points = np.array([[tr1_pt1[0] - x, tr1_pt1[1] - y],
+                           [tr1_pt2[0] - x, tr1_pt2[1] - y],
+                           [tr1_pt3[0] - x, tr1_pt3[1] - y]], np.int32)
 
-    warped_im2 = warp_im(im2source, M, im1.shape)
-    # warped_im3 = warp_im(im1, M1, im2source.shape)
+        cv2.fillConvexPoly(cropped_tr1_mask, points, 255)
 
-    warped_corrected_im2 = correct_colours(im1, warped_im2, landmarks1)
-    # warped_corrected_im3 = correct_colours(im2source, warped_im3, landmarks_source)
-    print(landmarks1.shape)
-    output_im1 = im1 * (1.0 - combined_mask) + warped_corrected_im2 * combined_mask
-    # output_im = output_im1 * (1.0 - combined_mask1) + warped_corrected_im3 * combined_mask1
+        # Lines space
+        cv2.line(lines_space_mask, tr1_pt1, tr1_pt2, 255)
+        cv2.line(lines_space_mask, tr1_pt2, tr1_pt3, 255)
+        cv2.line(lines_space_mask, tr1_pt1, tr1_pt3, 255)
+        lines_space = cv2.bitwise_and(im_source, im_source, mask=lines_space_mask)
 
-    cv2.imwrite('output/' + filename, combined_mask)
+        # Triangulation of second face
+        tr2_pt1 = landmarks_points2[triangle_index[0]]
+        tr2_pt2 = landmarks_points2[triangle_index[1]]
+        tr2_pt3 = landmarks_points2[triangle_index[2]]
+        triangle2 = np.array([tr2_pt1, tr2_pt2, tr2_pt3], np.int32)
+
+        rect2 = cv2.boundingRect(triangle2)
+        (x, y, w, h) = rect2
+
+        cropped_tr2_mask = np.zeros((h, w), np.uint8)
+
+        points2 = np.array([[tr2_pt1[0] - x, tr2_pt1[1] - y],
+                            [tr2_pt2[0] - x, tr2_pt2[1] - y],
+                            [tr2_pt3[0] - x, tr2_pt3[1] - y]], np.int32)
+
+        cv2.fillConvexPoly(cropped_tr2_mask, points2, 255)
+
+        # Warp triangles
+        points = np.float32(points)
+        points2 = np.float32(points2)
+        M = cv2.getAffineTransform(points, points2)
+        warped_triangle = cv2.warpAffine(cropped_triangle, M, (w, h))
+        warped_triangle = cv2.bitwise_and(warped_triangle, warped_triangle, mask=cropped_tr2_mask)
+
+        # Reconstructing destination face
+        img2_new_face_rect_area = img2_new_face[y: y + h, x: x + w]
+        img2_new_face_rect_area_gray = cv2.cvtColor(img2_new_face_rect_area, cv2.COLOR_BGR2GRAY)
+        _, mask_triangles_designed = cv2.threshold(img2_new_face_rect_area_gray, 1, 255, cv2.THRESH_BINARY_INV)
+        warped_triangle = cv2.bitwise_and(warped_triangle, warped_triangle, mask=mask_triangles_designed)
+
+        img2_new_face_rect_area = cv2.add(img2_new_face_rect_area, warped_triangle)
+        img2_new_face[y: y + h, x: x + w] = img2_new_face_rect_area
+
+    # Face swapped (putting 1st face into 2nd face)
+    img2_face_mask = np.zeros_like(img2_gray)
+    img2_head_mask = cv2.fillConvexPoly(img2_face_mask, convexhull2, 255)
+    img2_face_mask = cv2.bitwise_not(img2_head_mask)
+
+    img2_head_noface = cv2.bitwise_and(im, im, mask=img2_face_mask)
+    result = cv2.add(img2_head_noface, img2_new_face)
+
+    (x, y, w, h) = cv2.boundingRect(convexhull2)
+    center_face2 = (int((x + x + w) / 2), int((y + y + h) / 2))
+
+    seamlessclone = cv2.seamlessClone(result, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
+
+    cv2.imwrite('output/' + filename, seamlessclone)
     print(filename + " finished, adding.")
-    break
+
 
