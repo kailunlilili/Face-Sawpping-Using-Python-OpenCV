@@ -1,47 +1,7 @@
-#!/usr/bin/python
 
-# Copyright (c) 2015 Matthew Earl
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-#     The above copyright notice and this permission notice shall be included
-#     in all copies or substantial portions of the Software.
-#
-#     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-#     OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-#     MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
-#     NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
-#     DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-#     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
-#     USE OR OTHER DEALINGS IN THE SOFTWARE.
+# video to image  ->>>>>>>>  ffmpeg -i testvideo1.mov output%05d.jpg
+# image to video ->>>>>>>> ffmpeg -i output%05d.jpg out.mp4
 
-"""
-This is the code behind the Switching Eds blog post:
-
-    http://matthewearl.github.io/2015/07/28/switching-eds-with-python/
-
-See the above for an explanation of the code below.
-
-To run the script you'll need to install dlib (http://dlib.net) including its
-Python bindings, and OpenCV. You'll also need to obtain the trained model from
-sourceforge:
-
-    http://sourceforge.net/projects/dclib/files/dlib/v18.10/shape_predictor_68_face_landmarks.dat.bz2
-
-Unzip with `bunzip2` and change `PREDICTOR_PATH` to refer to this file. The
-script is run like so:
-
-    ./faceswap.py <head image> <face image>
-
-If successful, a file `output.jpg` will be produced with the facial features
-from `<head image>` replaced with the facial features from `<face image>`.
-
-"""
 
 import cv2
 import dlib
@@ -51,12 +11,17 @@ import sys
 import glob
 import shutil
 import image_processing
+import numpy as np
+
 PREDICTOR_PATH = "shape_predictor_68_face_landmarks.dat"
 SCALE_FACTOR = 1
 FEATHER_AMOUNT = 11
 
 FACE_POINTS = list(range(17, 68))
 MOUTH_POINTS = list(range(48, 61))
+
+Teeth_POINTS = list(range(61, 68))
+
 RIGHT_BROW_POINTS = list(range(17, 22))
 LEFT_BROW_POINTS = list(range(22, 27))
 RIGHT_EYE_POINTS = list(range(36, 42))
@@ -123,15 +88,18 @@ def get_face_mask(im, landmarks):
 
     return im
 
+def extract_index_nparray(nparray):
+    index = None
+    for num in nparray[0]:
+        index = num
+        break
+    return index
 
 def transformation_from_points(points1, points2):
     """
     Return an affine transformation [s * R | T] such that:
-
         sum ||s*R*p1,i + T - p2,i||^2
-
     is minimized.
-
     """
     # Solve the procrustes problem by subtracting centroids, scaling by the
     # standard deviation, and then using the SVD to calculate the rotation. See
@@ -193,52 +161,185 @@ def correct_colours(im1, im2, landmarks1):
 
 
 
-im_source = cv2.imread("./image folder/source.jpg", cv2.IMREAD_COLOR)
+im_source = cv2.imread("./image folder/source.jpg")
 im_source = cv2.resize(im_source, (im_source.shape[1] * SCALE_FACTOR,
                                    im_source.shape[0] * SCALE_FACTOR))
+img_gray = cv2.cvtColor(im_source, cv2.COLOR_BGR2GRAY)
+# mask = np.zeros_like(img_gray)
+
 source_rect = detector(im_source, 1)
-print(im_source.shape)
+
+
+faces = detector(img_gray)
+for face in faces:
+    landmarks = predictor(img_gray, face)
+    landmarks_points = []
+    for n in ALIGN_POINTS:
+        x = landmarks.part(n).x
+        y = landmarks.part(n).y
+        landmarks_points.append((x, y))
+
+
+    points = np.array(landmarks_points, np.int32)
+    convexhull = cv2.convexHull(points)
+
+    # cv2.polylines(img, [convexhull], True, (255, 0, 0), 3)
+    # cv2.fillConvexPoly(mask, convexhull, 255)
+# change above ----------------->
+
+    # face_image_1 = cv2.bitwise_and(im_source, im_source, mask=mask)
+
+    # Delaunay triangulation
+    rect = cv2.boundingRect(convexhull)
+    subdiv = cv2.Subdiv2D(rect)
+    subdiv.insert(landmarks_points)
+    triangles = subdiv.getTriangleList()
+    triangles = np.array(triangles, dtype=np.int32)
+
+    indexes_triangles = []
+    for t in triangles:
+        pt1 = (t[0], t[1])
+        pt2 = (t[2], t[3])
+        pt3 = (t[4], t[5])
+
+
+        index_pt1 = np.where((points == pt1).all(axis=1))
+        index_pt1 = extract_index_nparray(index_pt1)
+
+        index_pt2 = np.where((points == pt2).all(axis=1))
+        index_pt2 = extract_index_nparray(index_pt2)
+
+        index_pt3 = np.where((points == pt3).all(axis=1))
+        index_pt3 = extract_index_nparray(index_pt3)
+
+        if index_pt1 is not None and index_pt2 is not None and index_pt3 is not None:
+            triangle = [index_pt1, index_pt2, index_pt3]
+            indexes_triangles.append(triangle)
+
+
+
+
+
 for filename in glob.glob('*.jpg'):
-    im = cv2.imread(filename, cv2.IMREAD_COLOR)
+    im = cv2.imread(filename)
     im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
                          im.shape[0] * SCALE_FACTOR))
-    rects = detector(im, 1)
+    img2_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+    height, width, channels = im.shape
+    img2_new_face = np.zeros((height, width, channels), np.uint8)
+    rects = detector(img2_gray)
+
     if len(rects) == 0:
         print(filename + " is missing faces. skipping.")
         shutil.copyfile(filename, 'output/' + filename)
         continue
 
-    im1, landmarks1 = (im, numpy.matrix([[p.x, p.y] for p in predictor(im, rects[0]).parts()]))
-    im2source, landmarks_source = (
-    im_source, numpy.matrix([[p.x, p.y] for p in predictor(im_source, source_rect[0]).parts()]))
+    landmarks = predictor(img2_gray, rects[0])
+    landmarks_points2 = []
+    for n in ALIGN_POINTS:
+        x = landmarks.part(n).x
+        y = landmarks.part(n).y
+        landmarks_points2.append((x, y))
 
-    M = transformation_from_points(landmarks1[ALIGN_POINTS],
-                                   landmarks_source[ALIGN_POINTS])
+    points2 = np.array(landmarks_points2, np.int32)
+    convexhull2 = cv2.convexHull(points2)
 
-    # M1 = transformation_from_points(landmarks_source[ALIGN_POINTS],
-    #                                 landmarks1[ALIGN_POINTS])
+    lines_space_mask = np.zeros_like(img_gray)
+    lines_space_new_face = np.zeros_like(im)
 
-    mask = get_face_mask(im2source, landmarks_source)
-    # mask1 = get_face_mask(im1, landmarks1)
+    for triangle_index in indexes_triangles:
+        # Triangulation of the first face
+        tr1_pt1 = landmarks_points[triangle_index[0]]
+        tr1_pt2 = landmarks_points[triangle_index[1]]
+        tr1_pt3 = landmarks_points[triangle_index[2]]
+        triangle1 = np.array([tr1_pt1, tr1_pt2, tr1_pt3], np.int32)
 
-    warped_mask = warp_im(mask, M, im1.shape)
-    # warped_mask1 = warp_im(mask1, M1, im2source.shape)
+        rect1 = cv2.boundingRect(triangle1)
+        (x, y, w, h) = rect1
+        cropped_triangle = im_source[y: y + h, x: x + w]
+        cropped_tr1_mask = np.zeros((h, w), np.uint8)
 
-    combined_mask = numpy.max([get_face_mask(im1, landmarks1), warped_mask],
-                              axis=0)
-    # combined_mask1 = numpy.max([get_face_mask(im2source, landmarks_source), warped_mask1],
-    #                            axis=0)
+        points = np.array([[tr1_pt1[0] - x, tr1_pt1[1] - y],
+                           [tr1_pt2[0] - x, tr1_pt2[1] - y],
+                           [tr1_pt3[0] - x, tr1_pt3[1] - y]], np.int32)
 
-    warped_im2 = warp_im(im2source, M, im1.shape)
-    # warped_im3 = warp_im(im1, M1, im2source.shape)
+        cv2.fillConvexPoly(cropped_tr1_mask, points, 255)
 
-    warped_corrected_im2 = correct_colours(im1, warped_im2, landmarks1)
-    # warped_corrected_im3 = correct_colours(im2source, warped_im3, landmarks_source)
-    print(landmarks1.shape)
-    output_im1 = im1 * (1.0 - combined_mask) + warped_corrected_im2 * combined_mask
-    # output_im = output_im1 * (1.0 - combined_mask1) + warped_corrected_im3 * combined_mask1
+        # Lines space
+        cv2.line(lines_space_mask, tr1_pt1, tr1_pt2, 255)
+        cv2.line(lines_space_mask, tr1_pt2, tr1_pt3, 255)
+        cv2.line(lines_space_mask, tr1_pt1, tr1_pt3, 255)
+        lines_space = cv2.bitwise_and(im_source, im_source, mask=lines_space_mask)
 
-    cv2.imwrite('output/' + filename, combined_mask)
+        # Triangulation of second face
+        tr2_pt1 = landmarks_points2[triangle_index[0]]
+        tr2_pt2 = landmarks_points2[triangle_index[1]]
+        tr2_pt3 = landmarks_points2[triangle_index[2]]
+        triangle2 = np.array([tr2_pt1, tr2_pt2, tr2_pt3], np.int32)
+
+        rect2 = cv2.boundingRect(triangle2)
+        (x, y, w, h) = rect2
+
+        cropped_tr2_mask = np.zeros((h, w), np.uint8)
+
+        points2 = np.array([[tr2_pt1[0] - x, tr2_pt1[1] - y],
+                            [tr2_pt2[0] - x, tr2_pt2[1] - y],
+                            [tr2_pt3[0] - x, tr2_pt3[1] - y]], np.int32)
+
+        cv2.fillConvexPoly(cropped_tr2_mask, points2, 255)
+
+        # Warp triangles
+        points = np.float32(points)
+        points2 = np.float32(points2)
+        M = cv2.getAffineTransform(points, points2)
+        warped_triangle = cv2.warpAffine(cropped_triangle, M, (w, h))
+        warped_triangle = cv2.bitwise_and(warped_triangle, warped_triangle, mask=cropped_tr2_mask)
+
+        # Reconstructing destination face
+        img2_new_face_rect_area = img2_new_face[y: y + h, x: x + w]
+        img2_new_face_rect_area_gray = cv2.cvtColor(img2_new_face_rect_area, cv2.COLOR_BGR2GRAY)
+        _, mask_triangles_designed = cv2.threshold(img2_new_face_rect_area_gray, 1, 255, cv2.THRESH_BINARY_INV)
+        warped_triangle = cv2.bitwise_and(warped_triangle, warped_triangle, mask=mask_triangles_designed)
+
+        img2_new_face_rect_area = cv2.add(img2_new_face_rect_area, warped_triangle)
+        img2_new_face[y: y + h, x: x + w] = img2_new_face_rect_area
+
+    # Face swapped (putting 1st face into 2nd face)
+    img2_face_mask = np.zeros_like(img2_gray)
+    img2_head_mask = cv2.fillConvexPoly(img2_face_mask, convexhull2, 255)
+    img2_face_mask = cv2.bitwise_not(img2_head_mask)
+
+    img2_head_noface = cv2.bitwise_and(im, im, mask=img2_face_mask)
+    result = cv2.add(img2_head_noface, img2_new_face)
+
+    (x, y, w, h) = cv2.boundingRect(convexhull2)
+    center_face2 = (int((x + x + w) / 2), int((y + y + h) / 2))
+
+    # # create a mouth mask
+    mouth_points2 = []
+    for n in Teeth_POINTS:
+        x = landmarks.part(n).x
+        y = landmarks.part(n).y
+        mouth_points2.append((x, y))
+
+    mouthpoints2 = np.array(mouth_points2, np.int32)
+    mouthconvexhull2 = cv2.convexHull(mouthpoints2)
+    img2_mouth_mask = np.zeros_like(img2_gray)
+    img2_mouth_mask = cv2.fillConvexPoly(img2_mouth_mask, mouthconvexhull2, 255)
+    img2_mouth_mask = cv2.cvtColor(img2_mouth_mask, cv2.COLOR_GRAY2BGR)
+    img2_mouth_part = im & img2_mouth_mask
+    result_no_mouth = cv2.subtract(result,img2_mouth_mask)
+    result_plus_img1_mouth = cv2.add(result_no_mouth, img2_mouth_part)
+    # result_no_mouth = cv2.add(result_no_mouth)
+    # result_no_mouth = cv2.subtract(img2_mouth_mask, mask_out)
+    # result[img2_mouth_mask] = im[img2_mouth_mask]
+    # (x, y, w, h) = cv2.boundingRect(mouthconvexhull2)
+    # center_face2_mouth = (int((x + x + w) / 2), int((y + y + h) / 2))
+    # seamlessclone_mouth_average = cv2.seamlessClone(result, im, img2_mouth_mask, center_face2_mouth, cv2.MIXED_CLONE)
+    #
+    # # -------------
+
+    seamlessclone = cv2.seamlessClone(result_plus_img1_mouth, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
+
+    cv2.imwrite('output/' + filename, seamlessclone)
     print(filename + " finished, adding.")
-    break
-
