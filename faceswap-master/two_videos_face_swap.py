@@ -1,8 +1,6 @@
 
 # video to image  ->>>>>>>>  ffmpeg -i testvideo1.mov output%05d.jpg
 # image to video ->>>>>>>> ffmpeg -i output%05d.jpg out.mp4
-
-
 import cv2
 import dlib
 import numpy
@@ -143,27 +141,31 @@ def warp_im(im, M, dshape):
     return output_im
 
 
-def correct_colours(im1, im2, landmarks1):
-    blur_amount = COLOUR_CORRECT_BLUR_FRAC * numpy.linalg.norm(
-        numpy.mean(landmarks1[LEFT_EYE_POINTS], axis=0) -
-        numpy.mean(landmarks1[RIGHT_EYE_POINTS], axis=0))
+#-----------------------------修改部分-------------------------------#
+def correct_colours(im1, im2, blur_amount):
     blur_amount = int(blur_amount)
+
     if blur_amount % 2 == 0:
         blur_amount += 1
+
     im1_blur = cv2.GaussianBlur(im1, (blur_amount, blur_amount), 0)
     im2_blur = cv2.GaussianBlur(im2, (blur_amount, blur_amount), 0)
+    im2_blur += 1
 
-    # Avoid divide-by-zero errors.
-    # im2_blur += 128 * (im2_blur <= 1.0)
-    im2_blur = numpy.add(im2_blur, 128 * (im2_blur <= 1.0), out=im2_blur, casting="unsafe")
-    return (im2.astype(numpy.float64) * im1_blur.astype(numpy.float64) /
-            im2_blur.astype(numpy.float64))
+    return ((im2.astype(numpy.float64) / im2_blur.astype(numpy.float64)) * im1_blur.astype(numpy.float64)).astype(np.uint8)
+#-----------------------------修改部分-------------------------------#
 
 
 
 im_source = cv2.imread("./image folder/source.jpg")
 im_source = cv2.resize(im_source, (im_source.shape[1] * SCALE_FACTOR,
                                    im_source.shape[0] * SCALE_FACTOR))
+
+# im_out = cv2.imread("./output00001.jpg")
+
+# cor = correct_colours(im_out, im_source, 100)
+# cv2.imwrite('test/' + 'test.jpg', cor)
+
 img_gray = cv2.cvtColor(im_source, cv2.COLOR_BGR2GRAY)
 # mask = np.zeros_like(img_gray)
 
@@ -215,10 +217,6 @@ for face in faces:
         if index_pt1 is not None and index_pt2 is not None and index_pt3 is not None:
             triangle = [index_pt1, index_pt2, index_pt3]
             indexes_triangles.append(triangle)
-
-
-
-
 
 for filename in glob.glob('*.jpg'):
     im = cv2.imread(filename)
@@ -309,6 +307,64 @@ for filename in glob.glob('*.jpg'):
     img2_head_mask = cv2.fillConvexPoly(img2_face_mask, convexhull2, 255)
     img2_face_mask = cv2.bitwise_not(img2_head_mask)
 
+
+
+
+
+    #-----------------------------修改部分-------------------------------#
+    img_face_mask = cv2.bitwise_not(img2_face_mask)
+
+    f = cv2.bitwise_and(im, im, mask=img_face_mask)
+    img2_new_face = correct_colours(img2_new_face, f, 3)
+    
+    # #f 和 newface
+    f1_hsv = cv2.cvtColor(f, cv2.COLOR_BGR2HSV)
+
+    f1h = f1_hsv[:,:,0]
+    f1h_mean = f1h[np.nonzero(f1h)].mean()
+
+    f1s = f1_hsv[:,:,1]
+    f1s_mean = f1s[np.nonzero(f1s)].mean()
+
+    f1v = f1_hsv[:,:,2]
+    f1v_mean = f1v[np.nonzero(f1v)].mean()
+
+    f2_hsv = cv2.cvtColor(img2_new_face, cv2.COLOR_BGR2HSV)
+    f2h = f2_hsv[:,:,0]
+    f2h_mean = f2h[np.nonzero(f2h)].mean()
+
+    f2s = f2_hsv[:,:,1]
+    f2s_mean = f2s[np.nonzero(f2s)].mean()
+
+    f2v = f2_hsv[:,:,2]
+    f2v_mean = f2v[np.nonzero(f2v)].mean()
+
+    hs = ((f1h_mean-f2h_mean)).astype(np.uint8)
+    # print(type(hs))
+    ss = ((f1s_mean-f2s_mean)/2).astype(np.uint8)
+    vs = ((f1v_mean-f2v_mean)/2).astype(np.uint8)
+
+    # f2h[np.nonzero(f2h)] += hs
+    # f2h[f2h > 179] -= 179
+    # f2h[f2h < 0] += 179
+
+    f2s[np.logical_or(f2h > 130, f2h < 100)] = f2s_mean
+    f2s = np.clip(f2s, 0, 255)
+
+    # f2v[np.nonzero(f2v)] += vs
+    # print('vs=',vs)
+    # f2v = np.clip(f2v, 0, 255)
+
+    f2_hsv[:,:,0] = f2h
+    f2_hsv[:,:,1] = f2s
+    f2_hsv[:,:,2] = f2v
+    img2_new_face = cv2.cvtColor(f2_hsv, cv2.COLOR_HSV2BGR)
+    #-----------------------------修改部分-------------------------------#
+
+    
+
+
+
     img2_head_noface = cv2.bitwise_and(im, im, mask=img2_face_mask)
     result = cv2.add(img2_head_noface, img2_new_face)
 
@@ -328,8 +384,30 @@ for filename in glob.glob('*.jpg'):
     img2_mouth_mask = cv2.fillConvexPoly(img2_mouth_mask, mouthconvexhull2, 255)
     img2_mouth_mask = cv2.cvtColor(img2_mouth_mask, cv2.COLOR_GRAY2BGR)
     img2_mouth_part = im & img2_mouth_mask
+    
     result_no_mouth = cv2.subtract(result,img2_mouth_mask)
     result_plus_img1_mouth = cv2.add(result_no_mouth, img2_mouth_part)
+
+
+
+
+    #-----------------------------修改部分-------------------------------#
+    mouth_hsv = cv2.cvtColor(result_plus_img1_mouth, cv2.COLOR_BGR2HSV)
+    mh = mouth_hsv[:,:,0]
+    ms = mouth_hsv[:,:,1]
+    mv = mouth_hsv[:,:,2]
+    ms[np.logical_or(mh > 130, mh < 100)] = f2s_mean
+    ms = np.clip(ms, 0, 255)
+
+    mouth_hsv[:,:,0] = mh
+    mouth_hsv[:,:,1] = ms
+    mouth_hsv[:,:,2] = mv
+    result_plus_img1_mouth = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
+    #-----------------------------修改部分-------------------------------#
+
+
+
+    # result_plus_img1_mouth = correct_colours(im, result_plus_img1_mouth, 10)
     # result_no_mouth = cv2.add(result_no_mouth)
     # result_no_mouth = cv2.subtract(img2_mouth_mask, mask_out)
     # result[img2_mouth_mask] = im[img2_mouth_mask]
@@ -340,6 +418,9 @@ for filename in glob.glob('*.jpg'):
     # # -------------
 
     seamlessclone = cv2.seamlessClone(result_plus_img1_mouth, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
-
+    cv2.imwrite('test/' + '1.jpg', result_plus_img1_mouth)
+    cv2.imwrite('test/' + '2.jpg', f)
+    cv2.imwrite('test/' + '3.jpg', img_face_mask)
+    cv2.imwrite('test/' + '4.jpg', img2_mouth_part)
     cv2.imwrite('output/' + filename, seamlessclone)
     print(filename + " finished, adding.")
