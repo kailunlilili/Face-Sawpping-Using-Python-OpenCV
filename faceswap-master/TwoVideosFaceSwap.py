@@ -1,4 +1,3 @@
-
 # video to image  ->>>>>>>>  ffmpeg -i testvideo1.mov output%05d.jpg
 # image to video ->>>>>>>> ffmpeg -i output%05d.jpg out.mp4
 
@@ -159,7 +158,7 @@ def face_swap_between_image_and_video(image_path, video_path):
     PREDICTOR_PATH = "shape_predictor_68_face_landmarks.dat"
     SCALE_FACTOR = 1
     FACE_POINTS = list(range(17, 68))
-    MOUTH_POINTS = list(range(48, 61))
+    MOUTH_POINTS = list(range(48, 68))
     # Teeth_POINTS = list(range(61, 68))
     RIGHT_BROW_POINTS = list(range(17, 22))
     LEFT_BROW_POINTS = list(range(22, 27))
@@ -169,9 +168,9 @@ def face_swap_between_image_and_video(image_path, video_path):
     JAW_POINTS = list(range(0, 17))
 
     # Points used to line up the images.
-    ALIGN_POINTS = (LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS +
-                    RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS)
-
+    # ALIGN_POINTS = (LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS +
+    #                 RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS)
+    ALIGN_POINTS = list(range(68))
     detector = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(PREDICTOR_PATH)
 
@@ -219,6 +218,8 @@ def face_swap_between_image_and_video(image_path, video_path):
         if not ret:
             break
 
+        if np.shape(frame) == ():
+            continue
         # if rotateCode is not None:
         #     frame = correct_rotation(frame, rotateCode)
 
@@ -239,7 +240,10 @@ def face_swap_between_image_and_video(image_path, video_path):
 
         if len(rects) == 0:
             print("missing faces. skipping.")
-            # shutil.copyfile(filename, 'output/' + filename)
+            continue
+
+        if len(rects) > 1:
+            print("more than one face. skipping.")
             continue
 
         landmarks = predictor(img2_gray, rects[0])
@@ -356,14 +360,12 @@ def face_swap_between_image_and_video(image_path, video_path):
         result_plus_img1_mouth = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
         # -----------------------------Color Correction-------------------------------#
 
-        seamlessclone = cv2.seamlessClone(result_plus_img1_mouth, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
-        # cv2.imwrite('test/' + '1.jpg', result_plus_img1_mouth)
-        # cv2.imwrite('test/' + '2.jpg', f)
-        # cv2.imwrite('test/' + '3.jpg', img_face_mask)
-        # cv2.imwrite('test/' + '4.jpg', img2_mouth_part)
-        writer.write(seamlessclone)
-        # cv2.imwrite('output/outimage', seamlessclone)
-        cv2.imwrite('output/{}.jpg'.format(frame_cnt), seamlessclone)
+        # seamlessclone = cv2.seamlessClone(result_plus_img1_mouth, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
+        seamlessclone = cv2.seamlessClone(result, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
+        final_no_mouth = cv2.subtract(seamlessclone, img2_mouth_mask)
+        final = cv2.add(final_no_mouth, img2_mouth_part)
+        writer.write(final)
+        cv2.imwrite('output/{}.jpg'.format(frame_cnt), final)
         print("finished adding frame -- ", frame_cnt)
     print('saving now -----------')
     cv2.destroyAllWindows()
@@ -375,5 +377,3 @@ if __name__ == "__main__":
     target_video_path = 'testvideo1.mov'
     face_swap_between_image_and_video(source_image_path, target_video_path)
     print("face swap finished")
-
-
