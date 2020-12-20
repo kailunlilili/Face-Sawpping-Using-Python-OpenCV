@@ -58,8 +58,8 @@ def face_swap_between_image_and_video(image_path):
     JAW_POINTS = list(range(0, 17))
 
     # Points used to line up the images.
-    ALIGN_POINTS = (LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS +
-                    RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS)
+    # ALIGN_POINTS = (LEFT_BROW_POINTS + RIGHT_EYE_POINTS + LEFT_EYE_POINTS +
+    #                 RIGHT_BROW_POINTS + NOSE_POINTS + MOUTH_POINTS)
     ALIGN_POINTS = list(range(68))
     detector = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(PREDICTOR_PATH)
@@ -108,37 +108,13 @@ def face_swap_between_image_and_video(image_path):
             if index_pt1 is not None and index_pt2 is not None and index_pt3 is not None:
                 triangle = [index_pt1, index_pt2, index_pt3]
                 indexes_triangles.append(triangle)
-
-
-    # video reader and writer
-
-    #check if need rotate
-    # rotateCode = check_rotation(rawVideo)
-
-    # Initialize video writer for tracking video
-    # trackVideo = 'results/Output_' + rawVideo
-    # fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-    # fps = cap.get(cv2.CAP_PROP_FPS)
-    # size = (int(cap.get(3)), int(cap.get(4)) )
-    # size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    # writer = cv2.VideoWriter(trackVideo, fourcc, fps, size)
-    # frame_cnt = 0
     cv2.namedWindow("preview")
     cap = cv2.VideoCapture(0)
     while True:
         im = cap.read()[1]
 
-        # ret, frame = cap.read()
-        # if not ret:
-        #     break
-
 
     # ------------------------------------------------
-        # frame_cnt += 1
-
-        # im = cv2.imread(filename)
-        # im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
-        #                      im.shape[0] * SCALE_FACTOR))
         img2_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         height, width, channels = im.shape
         img2_new_face = np.zeros((height, width, channels), np.uint8)
@@ -254,16 +230,8 @@ def face_swap_between_image_and_video(image_path):
         ss = ((f1s_mean - f2s_mean) / 2).astype(np.uint8)
         vs = ((f1v_mean - f2v_mean) / 2).astype(np.uint8)
 
-        # f2h[np.nonzero(f2h)] += hs
-        # f2h[f2h > 179] -= 179
-        # f2h[f2h < 0] += 179
-
         f2s[np.logical_or(f2h > 130, f2h < 100)] = f2s_mean
         f2s = np.clip(f2s, 0, 255)
-
-        # f2v[np.nonzero(f2v)] += vs
-        # print('vs=',vs)
-        # f2v = np.clip(f2v, 0, 255)
 
         f2_hsv[:, :, 0] = f2h
         f2_hsv[:, :, 1] = f2s
@@ -292,28 +260,21 @@ def face_swap_between_image_and_video(image_path):
         img2_mouth_mask = np.zeros_like(img2_gray)
         img2_mouth_mask = cv2.fillConvexPoly(img2_mouth_mask, mouthconvexhull2, 255)
         img2_mouth_mask = cv2.cvtColor(img2_mouth_mask, cv2.COLOR_GRAY2BGR)
-        # Use mouth part from current frame
-        # img2_mouth_part = im & img2_mouth_mask
-        # Use mouth part from mix of current frame and source image
         img2_mouth_part = seamlessclone_mouth_mix & img2_mouth_mask
 
-        # result_no_mouth = cv2.subtract(result, img2_mouth_mask)
-        # result_plus_img1_mouth = cv2.add(result_no_mouth, img2_mouth_part)
+        # -----------------------------Color Correction-------------------------------#
+        mouth_hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV)
+        mh = mouth_hsv[:, :, 0]
+        ms = mouth_hsv[:, :, 1]
+        mv = mouth_hsv[:, :, 2]
+        ms[np.logical_or(mh > 130, mh < 100)] = f2s_mean
+        ms = np.clip(ms, 0, 255)
 
+        mouth_hsv[:, :, 0] = mh
+        mouth_hsv[:, :, 1] = ms
+        mouth_hsv[:, :, 2] = mv
+        result = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
         # -----------------------------Color Correction-------------------------------#
-        # mouth_hsv = cv2.cvtColor(result_plus_img1_mouth, cv2.COLOR_BGR2HSV)
-        # mh = mouth_hsv[:, :, 0]
-        # ms = mouth_hsv[:, :, 1]
-        # mv = mouth_hsv[:, :, 2]
-        # ms[np.logical_or(mh > 130, mh < 100)] = f2s_mean
-        # ms = np.clip(ms, 0, 255)
-        #
-        # mouth_hsv[:, :, 0] = mh
-        # mouth_hsv[:, :, 1] = ms
-        # mouth_hsv[:, :, 2] = mv
-        # result_plus_img1_mouth = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
-        # -----------------------------Color Correction-------------------------------#
-        # seamlessclone = cv2.seamlessClone(result, im, img2_head_mask, center_face2, cv2.MIXED_CLONE)
         seamlessclone = cv2.seamlessClone(result, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
 
         final_no_mouth = cv2.subtract(seamlessclone, img2_mouth_mask)
@@ -324,7 +285,7 @@ def face_swap_between_image_and_video(image_path):
             break
 
 if __name__ == "__main__":
-    source_image_path = "./image folder/source10.jpg"
+    source_image_path = "./image folder/source2.jpg"
     face_swap_between_image_and_video(source_image_path)
     print("face swap finished")
 

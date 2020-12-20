@@ -5,15 +5,8 @@
 import cv2
 import dlib
 import numpy
-import ffmpeg
-
-import sys
-import glob
-import shutil
-import image_processing
-import numpy as np
-
-
+from face_pose_detection_image import *
+from Video_Pose_Detection import *
 class TooManyFaces(Exception):
     pass
 
@@ -146,15 +139,18 @@ def recon_face (landmarks_points, landmarks_points2, triangle_index, img2_new_fa
     img2_new_face_rect_area = img2_new_face[y: y + h, x: x + w]
     img2_new_face_rect_area_gray = cv2.cvtColor(img2_new_face_rect_area, cv2.COLOR_BGR2GRAY)
     _, mask_triangles_designed = cv2.threshold(img2_new_face_rect_area_gray, 1, 255, cv2.THRESH_BINARY_INV)
+    # if mask_triangles_designed.shape != warped_triangle[:3]:
+    #     return 'error'
     warped_triangle = cv2.bitwise_and(warped_triangle, warped_triangle, mask=mask_triangles_designed)
 
     img2_new_face_rect_area = cv2.add(img2_new_face_rect_area, warped_triangle)
     img2_new_face[y: y + h, x: x + w] = img2_new_face_rect_area
+    # return 'no error'
 # -----------------------------修改部分-------------------------------#
 
-def face_swap_between_image_and_video(image_path, video_path):
+
+def face_swap_between_image_and_video(video_path):
     rawVideo = video_path
-    sourceImage = image_path
     PREDICTOR_PATH = "shape_predictor_68_face_landmarks.dat"
     SCALE_FACTOR = 1
     FACE_POINTS = list(range(17, 68))
@@ -175,29 +171,40 @@ def face_swap_between_image_and_video(image_path, video_path):
     predictor = dlib.shape_predictor(PREDICTOR_PATH)
 
 
-    # yet the mask image and detect the face
-    im_source = cv2.imread(sourceImage)
-    im_source = cv2.resize(im_source, (im_source.shape[1] * SCALE_FACTOR,
-                                       im_source.shape[0] * SCALE_FACTOR))
-    img_gray = cv2.cvtColor(im_source, cv2.COLOR_BGR2GRAY)
-    source_rect = detector(im_source, 1)
-    faces = detector(img_gray)
+# image gray
+    im_source_dict = dict()
+    img_gray_dict = dict()
+    indexes_triangles_dict = dict()
+    landmarks_points_dict = dict()
+
+    pose_dict = {'Left':'./GAZE/left.jpg','Forward': './GAZE/forward.jpg','Right': './GAZE/right.jpg'}
+    for pose_name, im_pth in pose_dict.items():
+        sourceImage = im_pth
+        im_source = cv2.imread(sourceImage)
+        im_source_dict[pose_name] = im_source
+        im_source = cv2.resize(im_source, (im_source.shape[1] * SCALE_FACTOR,
+                                           im_source.shape[0] * SCALE_FACTOR))
+
+        img_gray = cv2.cvtColor(im_source, cv2.COLOR_BGR2GRAY)
+        img_gray_dict[pose_name] = img_gray
+        source_rect = detector(im_source, 1)
+        faces = detector(img_gray)
 
 
-    for face in faces:
-        landmarks = predictor(img_gray, face)
-        landmarks_points = []
-        for n in ALIGN_POINTS:
-            x = landmarks.part(n).x
-            y = landmarks.part(n).y
-            landmarks_points.append((x, y))
-
-        points = np.array(landmarks_points, np.int32)
-        convexhull = cv2.convexHull(points)
-        triangles = delaunay_triangulation(convexhull,landmarks_points)
-        indexes_triangles = []
-        get_indexes_triangles(indexes_triangles, triangles,points)
-
+        for face in faces:
+            landmarks = predictor(img_gray, face)
+            landmarks_points = []
+            for n in ALIGN_POINTS:
+                x = landmarks.part(n).x
+                y = landmarks.part(n).y
+                landmarks_points.append((x, y))
+            landmarks_points_dict[pose_name] = landmarks_points
+            points = np.array(landmarks_points, np.int32)
+            convexhull = cv2.convexHull(points)
+            triangles = delaunay_triangulation(convexhull,landmarks_points)
+            indexes_triangles = []
+            get_indexes_triangles(indexes_triangles, triangles,points)
+            indexes_triangles_dict[pose_name] = indexes_triangles
     # video reader and writer
     cap = cv2.VideoCapture(rawVideo)
 
@@ -205,8 +212,9 @@ def face_swap_between_image_and_video(image_path, video_path):
     # rotateCode = check_rotation(rawVideo)
 
     # Initialize video writer for tracking video
-    trackVideo = 'results/Output_' + rawVideo
-    fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+    trackVideo = 'results/Output_' + rawVideo[-6:]
+    # fourcc = cv2.VideoWriter_fourcc(*'H264')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     fps = cap.get(cv2.CAP_PROP_FPS)
     size = (int(cap.get(3)), int(cap.get(4)) )
     # size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
@@ -216,21 +224,35 @@ def face_swap_between_image_and_video(image_path, video_path):
     while (cap.isOpened()):
         ret, frame = cap.read()
         if not ret:
+            print('no ret break')
             break
 
         if np.shape(frame) == ():
+            print('not frame continue')
             continue
         # if rotateCode is not None:
         #     frame = correct_rotation(frame, rotateCode)
 
     # rotate if iphone videos, comment if download videos
-        frame = correct_rotation(frame, cv2.ROTATE_180)
+    #     frame = correct_rotation(frame, cv2.ROTATE_180)
     # ------------------------------------------------
 
         frame_cnt += 1
 
         # im = cv2.imread(filename)
         im = frame.copy()
+        frame_pose = pose(im)
+        if not frame_pose:
+            print(frame_cnt, '  No Face Pose')
+            continue
+        print('frame --- ',frame_cnt, 'pose is ', frame_pose)
+
+        im_source = im_source_dict[frame_pose]
+        img_gray = img_gray_dict[frame_pose]
+        indexes_triangles = indexes_triangles_dict[frame_pose]
+        landmarks_points = landmarks_points_dict[frame_pose]
+
+
         im = cv2.resize(im, (im.shape[1] * SCALE_FACTOR,
                              im.shape[0] * SCALE_FACTOR))
         img2_gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
@@ -258,9 +280,13 @@ def face_swap_between_image_and_video(image_path, video_path):
 
         lines_space_mask = np.zeros_like(img_gray)
         lines_space_new_face = np.zeros_like(im)
+        try:
 
-        for triangle_index in indexes_triangles:
-            recon_face(landmarks_points, landmarks_points2, triangle_index, img2_new_face, im_source,lines_space_mask)
+            for triangle_index in indexes_triangles:
+                recon_face(landmarks_points, landmarks_points2, triangle_index, img2_new_face, im_source,lines_space_mask)
+        except:
+            print('error here, jump to next frame')
+            continue
 
         # Face swapped (putting 1st face into 2nd face)
         img2_face_mask = np.zeros_like(img2_gray)
@@ -347,7 +373,7 @@ def face_swap_between_image_and_video(image_path, video_path):
         result_plus_img1_mouth = cv2.add(result_no_mouth, img2_mouth_part)
 
         # -----------------------------Color Correction-------------------------------#
-        mouth_hsv = cv2.cvtColor(result_plus_img1_mouth, cv2.COLOR_BGR2HSV)
+        mouth_hsv = cv2.cvtColor(result, cv2.COLOR_BGR2HSV)
         mh = mouth_hsv[:, :, 0]
         ms = mouth_hsv[:, :, 1]
         mv = mouth_hsv[:, :, 2]
@@ -357,7 +383,7 @@ def face_swap_between_image_and_video(image_path, video_path):
         mouth_hsv[:, :, 0] = mh
         mouth_hsv[:, :, 1] = ms
         mouth_hsv[:, :, 2] = mv
-        result_plus_img1_mouth = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
+        result = cv2.cvtColor(mouth_hsv, cv2.COLOR_HSV2BGR)
         # -----------------------------Color Correction-------------------------------#
 
         # seamlessclone = cv2.seamlessClone(result_plus_img1_mouth, im, img2_head_mask, center_face2, cv2.NORMAL_CLONE)
@@ -368,12 +394,16 @@ def face_swap_between_image_and_video(image_path, video_path):
         cv2.imwrite('output/{}.jpg'.format(frame_cnt), final)
         print("finished adding frame -- ", frame_cnt)
     print('saving now -----------')
-    cv2.destroyAllWindows()
     cap.release()
     writer.release()
+    cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
-    source_image_path = "./image folder/source.jpg"
-    target_video_path = 'testvideo1.mov'
-    face_swap_between_image_and_video(source_image_path, target_video_path)
+    video1_path = './test video/LucianoRosso1.mp4'
+    video2_path = './test video/dance2.mp4'
+    video_pose_detection(video1_path)
+    face_swap_between_image_and_video(video2_path)
+    video_pose_detection(video2_path)
+    face_swap_between_image_and_video(video1_path)
     print("face swap finished")
