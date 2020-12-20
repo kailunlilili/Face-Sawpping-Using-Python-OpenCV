@@ -74,6 +74,9 @@ def pose_detection(source, path):
     frame = 0
     best_right = 0
     best_left = 0
+    best_forward = 100
+    left_flag = False
+    right_flag = False
     while cap.isOpened():
         GAZE = "Face Not Found"
         ret, img = cap.read()
@@ -115,6 +118,7 @@ def pose_detection(source, path):
                     print('better than last left')
                     best_left = angles[1]
                     cv2.imwrite(path + '/left.jpg', img)
+                    left_flag = True
             elif angles[1] > 20:
                 GAZE = "Right"
                 print(GAZE)
@@ -122,6 +126,7 @@ def pose_detection(source, path):
                     print('better than last right ')
                     best_right = angles[1]
                     cv2.imwrite(path + '/right.jpg', img)
+                    right_flag = True
                 # if not os.path.exists(path + '/right.jpg'):
 
 
@@ -132,10 +137,16 @@ def pose_detection(source, path):
             else:
                 GAZE = "Forward"
                 print(GAZE)
-                if not os.path.exists(path + '/forward.jpg'):
+                if left_flag==False:
+                    cv2.imwrite(path + '/left.jpg', img)
+                    left_flag = True
+                if right_flag==False:
+                    cv2.imwrite(path + '/right.jpg', img)
+                    right_flag = True
+                if abs(angles[1]) < best_forward:
+                    print('better than last forward')
                     cv2.imwrite(path + '/forward.jpg', img)
     cap.release()
-    # videoWriter.release()
     cv2.destroyAllWindows()
 
 

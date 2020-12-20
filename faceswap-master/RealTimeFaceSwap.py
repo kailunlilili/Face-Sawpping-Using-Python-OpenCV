@@ -1,8 +1,3 @@
-
-# video to image  ->>>>>>>>  ffmpeg -i testvideo1.mov output%05d.jpg
-# image to video ->>>>>>>> ffmpeg -i output%05d.jpg out.mp4
-
-
 import cv2
 import dlib
 import numpy

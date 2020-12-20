@@ -1,12 +1,6 @@
 import cv2
 import dlib
 import numpy
-import ffmpeg
-
-import sys
-import glob
-import shutil
-import image_processing
 import numpy as np
 
 
